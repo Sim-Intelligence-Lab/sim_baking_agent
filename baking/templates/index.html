@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f8f4ed">
+    <title>Baking with Trang</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: light;
+            --ink: #30251f;
+            --muted: #75685f;
+            --paper: #fffdf9;
+            --line: #eadfd2;
+            --accent: #a64b2a;
+            --accent-dark: #87391e;
+            --soft: #f8f1e8;
+            --green: #54734f;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            min-width: 320px;
+            min-height: 100vh;
+            margin: 0;
+            padding: 28px;
+            background: #f8f4ed;
+            color: var(--ink);
+            font-family: 'DM Sans', sans-serif;
+        }
+
+        button { font: inherit; }
+
+        .app-shell { max-width: 1500px; margin: 0 auto; }
+
+        .app-header {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 20px;
+            margin: 0 0 22px;
+        }
+
+        .eyebrow {
+            margin: 0 0 5px;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .16em;
+            text-transform: uppercase;
+        }
+
+        h1, h2, h3, p { margin-top: 0; }
+        h1, h2 { font-family: 'Playfair Display', Georgia, serif; }
+        h1 { margin-bottom: 5px; font-size: clamp(28px, 4vw, 38px); line-height: 1.1; }
+        .app-subtitle { margin: 0; color: var(--muted); font-size: 14px; }
+        .header-note { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: minmax(220px, .88fr) minmax(420px, 1.65fr) minmax(230px, .9fr);
+            align-items: stretch;
+            gap: 18px;
+        }
+
+        .panel {
+            min-width: 0;
+            min-height: 690px;
+            padding: 20px;
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: var(--paper);
+            box-shadow: 0 8px 24px rgba(63, 43, 28, .055);
+        }
+
+        .center-panel { display: flex; flex-direction: column; gap: 14px; }
+        .panel-heading { margin-bottom: 14px; }
+        .panel-heading h2 { margin: 0; font-size: 20px; }
+        .panel-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+        .progress-list { margin: 0; padding: 0; list-style: none; counter-reset: recipe-step; }
+        #steps > li {
+            position: relative;
+            margin: 0;
+            padding: 9px 8px 9px 34px;
+            border-bottom: 1px solid #f1e9df;
+            color: var(--ink);
+            counter-increment: recipe-step;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        #steps > li::before {
+            position: absolute;
+            top: 8px;
+            left: 3px;
+            display: grid;
+            width: 21px;
+            height: 21px;
+            place-items: center;
+            border: 1px solid var(--line);
+            border-radius: 50%;
+            color: var(--muted);
+            content: counter(recipe-step);
+            font-size: 10px;
+            font-weight: 700;
+        }
+        #steps > li.completed { color: var(--green); text-decoration: none; }
+        #steps > li.completed::before { border-color: #c8d8c2; background: #edf4e9; color: var(--green); content: '✓'; }
+        #steps ul { margin: 6px 0 0; padding-left: 14px; color: var(--muted); }
+        #steps ul li { margin: 3px 0; font-size: 11px; }
+        .tool-used { color: var(--green); text-decoration: line-through; }
+
+        .ingredient-section { margin-top: 22px; }
+        .ingredient-section h3 { margin: 0 0 8px; color: var(--muted); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+        #dry-ingredients, #wet-ingredients { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+        #dry-ingredients li, #wet-ingredients li {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 7px 9px;
+            border-radius: 8px;
+            background: var(--soft);
+            font-size: 11px;
+        }
+
+        #feedback-container { min-height: 106px; }
+        #feedback {
+            min-height: 90px;
+            max-height: 145px;
+            padding: 13px 15px;
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fffaf3;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        #feedback h3 { margin: 0 0 6px; color: var(--ink); font-size: 12px; }
+        #feedback ul { margin: 0 0 8px; padding-left: 18px; }
+
+        #game-container {
+            display: flex;
+            width: 100%;
+            min-height: 410px;
+            flex: 1;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #f3f4ed;
+        }
+        #game-container canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        #speech-box-container {
+            min-height: 96px;
+            max-height: 155px;
+            padding: 15px 17px;
+            overflow: auto;
+            border-left: 4px solid var(--accent);
+            border-radius: 10px;
+            background: var(--soft);
+        }
+        #speech-box { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.6; }
+
+        .navigation-panel { display: flex; flex-direction: column; }
+        .navigation-panel .panel-heading { margin-bottom: 18px; }
+        #button-container { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+        button {
+            min-height: 44px;
+            padding: 10px 12px;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            background: var(--accent);
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 700;
+            transition: background-color .15s ease, transform .15s ease, box-shadow .15s ease;
+        }
+        button:hover:not(:disabled) { transform: translateY(-1px); background: var(--accent-dark); box-shadow: 0 4px 10px rgba(80, 38, 20, .15); }
+        button:focus-visible { outline: 3px solid #e5a17e; outline-offset: 2px; }
+        button:disabled { border-color: var(--line); background: #eee9e2; color: #988c82; cursor: not-allowed; }
+        #auto-progress { width: 100%; margin-top: 12px; border-color: #d9e5d4; background: #eaf1e6; color: #3e6038; }
+        #auto-progress:hover:not(:disabled) { background: #dce9d5; }
+        #auto-progress.active { border-color: #f0d1c8; background: #fae8e2; color: #8a3b2b; }
+
+        .step-status {
+            margin-top: 18px;
+            padding: 13px;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            background: #fffaf3;
+        }
+        .step-status-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+        #current-step { color: var(--ink); font-size: 14px; font-weight: 700; }
+        .navigation-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+        @media (max-width: 1120px) {
+            body { padding: 20px; }
+            .dashboard { grid-template-columns: minmax(200px, .8fr) minmax(360px, 1.4fr); }
+            .navigation-panel { min-height: auto; grid-column: 1 / -1; }
+            #steps { columns: 2; column-gap: 24px; }
+            #steps > li { break-inside: avoid; }
+            .navigation-panel .panel-heading { margin-bottom: 12px; }
+            .step-status { margin-top: 12px; }
+        }
+
+        @media (max-width: 720px) {
+            body { padding: 16px 12px; }
+            .app-header { align-items: start; flex-direction: column; gap: 7px; margin-bottom: 15px; }
+            .header-note { white-space: normal; }
+            .dashboard { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+            .panel { min-height: auto; padding: 16px; }
+            .center-panel { order: -1; }
+            #game-container { min-height: min(92vw, 410px); }
+            #steps { columns: 1; }
+            .navigation-panel { grid-column: auto; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+        }
+    </style>
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-header">
+            <div>
+                <p class="eyebrow">Sim Baking Agent</p>
+                <h1>Trang's Kitchen</h1>
+                <p class="app-subtitle">A little flour, a little patience, and one cake coming right up.</p>
+            </div>
+            <p class="header-note">Follow the recipe and watch each step unfold.</p>
+        </header>
+
+        <div class="dashboard">
+            <aside id="left-panel" class="panel" aria-labelledby="progress-title">
+                <div class="panel-heading">
+                    <h2 id="progress-title">Baking Progress</h2>
+                    <p>Completed tasks are checked off as Trang goes.</p>
+                </div>
+                <ol id="steps" class="progress-list" aria-live="polite"></ol>
+
+                <section class="ingredient-section" aria-labelledby="dry-title">
+                    <h3 id="dry-title">Dry Ingredients</h3>
+                    <ul id="dry-ingredients"></ul>
+                </section>
+                <section class="ingredient-section" aria-labelledby="wet-title">
+                    <h3 id="wet-title">Wet Ingredients</h3>
+                    <ul id="wet-ingredients"></ul>
+                </section>
+            </aside>
+
+            <section id="center-column" class="panel center-panel" aria-label="Kitchen And Conversation">
+                <section id="feedback-container" aria-labelledby="feedback-title">
+                    <div class="panel-heading">
+                        <h2 id="feedback-title">Kitchen Notes</h2>
+                    </div>
+                    <div id="feedback" aria-live="polite">Trang's feedback will appear here.</div>
+                </section>
+                <div id="game-container" aria-label="Animated Kitchen"></div>
+                <section id="speech-box-container" aria-label="Trang Says">
+                    <div id="speech-box" aria-live="polite">Getting the kitchen ready…</div>
+                </section>
+            </section>
+
+            <aside id="right-panel" class="panel navigation-panel" aria-labelledby="navigation-title">
+                <div class="panel-heading">
+                    <h2 id="navigation-title">Step Controls</h2>
+                    <p>Move through the baking timeline at your own pace.</p>
+                </div>
+                <nav id="button-container" aria-label="Baking Step Navigation">
+                    <button id="prev-step" type="button" aria-label="Go to Previous Step" disabled>← Previous Step</button>
+                    <button id="next-step" type="button" aria-label="Go to Next Step" disabled>Next Step →</button>
+                </nav>
+                <button id="auto-progress" type="button" aria-pressed="false">Play Simulation</button>
+                <div class="step-status">
+                    <span class="step-status-label">Timeline Position</span>
+                    <div id="current-step" role="status" aria-live="polite">Preparing the kitchen…</div>
+                </div>
+                <p class="navigation-hint">Previous and Next browse steps already shown. Next asks Trang for another step when you reach the latest one.</p>
+            </aside>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='game.js') }}?v=5"></script>
+</body>
+</html>
