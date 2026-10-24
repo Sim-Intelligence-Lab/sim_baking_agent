@@ -20,6 +20,9 @@ const HEIGHT = MAP_HEIGHT * TILE_SIZE * SCALE;
 const WALKABLE_TILES = [0, 98, 101, 100, 99];
 const WALKABLE_BEHIND_TILES = [110, 111, 112, 136, 137, 138];
 const START_TILE = { x: 4, y: 5 };
+// Bump when images change so browsers fetch the new files instead of cached ones.
+const ASSET_VERSION = 2;
+const asset = path => `static/assets/${path}?v=${ASSET_VERSION}`;
 
 // Per-recipe kitchen setup. `actions` maps each environment action to the
 // walk Trang takes for it; `next` continues with the following action.
@@ -124,20 +127,20 @@ function typeWriter(text, elementId, speed = 10) {
 }
 
 function preload() {
-  this.load.image('tiles', 'static/assets/kitchen_tileset.png');
-  this.load.tilemapCSV('kitchen-map', 'static/assets/kitchen_tilemap.csv');
-  this.load.spritesheet('char', 'static/assets/char_spritesheet.png', { frameWidth: 32, frameHeight: 32 });
+  this.load.image('tiles', asset('kitchen_tileset.png'));
+  this.load.tilemapCSV('kitchen-map', asset('kitchen_tilemap.csv'));
+  this.load.spritesheet('char', asset('char_spritesheet.png'), { frameWidth: 32, frameHeight: 32 });
   
   const itemImages = new Set();
   Object.values(RECIPES).forEach(recipe => Object.values(recipe.itemMap).forEach(item => {
     if (item !== 'oven' && item !== 'fridge') itemImages.add(item);
   }));
-  itemImages.forEach(item => this.load.image(item, `static/assets/${item}.png`));
-  this.load.tilemapCSV('item-positions-cake', 'static/assets/item_positions.csv');
-  this.load.tilemapCSV('item-positions-pizza', 'static/assets/pizza_item_positions.csv');
+  itemImages.forEach(item => this.load.image(item, asset(`${item}.png`)));
+  this.load.tilemapCSV('item-positions-cake', asset('item_positions.csv'));
+  this.load.tilemapCSV('item-positions-pizza', asset('pizza_item_positions.csv'));
   Object.keys(RECIPES).forEach(recipe => {
-    this.load.image(`success_${recipe}`, `static/assets/success_${recipe}.png`);
-    this.load.image(`bad_${recipe}`, `static/assets/bad_${recipe}.png`);
+    this.load.image(`success_${recipe}`, asset(`success_${recipe}.png`));
+    this.load.image(`bad_${recipe}`, asset(`bad_${recipe}.png`));
   });
 }
 
