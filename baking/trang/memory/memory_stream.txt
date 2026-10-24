@@ -34,6 +34,28 @@ Steps:
 
 Human–computer interaction (HCI) is research in the design and the use of computer technology, which focuses on the interfaces between people (users) and computers. HCI researchers observe the ways humans interact with computers and design technologies that allow humans to interact with computers in novel ways. A device that allows interaction between human being and a computer is known as a "Human-computer Interface (HCI)".
 
+Pizza steps:
+1. Preheat the oven to 475°F (245°C).
+2. Prepare the pizza pan.
+3. Get the mixing bowl for the dough.
+4. Add flour to the mixing bowl.
+5. Add yeast to the mixing bowl.
+6. Add salt to the mixing bowl.
+7. Add warm water to the mixing bowl.
+8. Add olive oil to the mixing bowl.
+9. Mix the dough in the mixing bowl until it comes together.
+10. Knead the dough for 8-10 minutes until smooth and stretchy.
+11. Let the dough rise for 1 hour until doubled in size.
+12. Take out the rolling pin.
+13. Roll out the dough into a 12-inch round and place it on the pizza pan.
+14. Add tomato sauce to the pizza.
+15. Add mozzarella to the pizza.
+16. Add basil leaves to the pizza.
+17. Top the pizza by spreading the sauce and arranging the toppings evenly.
+18. Bake the pizza for 12-15 minutes until the crust is golden and the cheese bubbles.
+19. Take out the pizza cutter.
+20. Slice the pizza into 8 pieces.
+
 Cloud Gate is a public sculpture by Indian-born British artist Anish Kapoor, that is the centerpiece of Grainger Plaza at Millennium Park in the Loop community area of Chicago. Constructed between 2004 and 2006, the sculpture is nicknamed "The Bean" because of its shape, a name Kapoor later grew fond of. Made up of 168 stainless steel plates welded together, its reflective and highly polished exterior has no visible seams. It measures 33 by 66 by 42 feet (10 by 20 by 13 m), and weighs 110 short tons (100 t; 98 long tons). The sculpture and its plaza are located above Park Grill, between the Chase Promenade and McCormick Tribune Plaza & Ice Rink.
 Kapoor's design was inspired by liquid mercury and the sculpture's surface reflects and distorts the city's skyline and clouds moving overhead. Visitors are able to walk around and under Cloud Gate's 12-foot (3.7 m) high arch. On the underside is the "omphalos" (Greek for "navel"), a concave chamber that warps and multiplies reflections. The sculpture builds upon many of Kapoor's artistic themes, and it is popular with tourists as a photo-taking opportunity for its unique reflective properties.
 The sculpture was the result of a design competition. After Kapoor's design was chosen, numerous technological concerns regarding the design's construction and assembly arose, in addition to concerns regarding the sculpture's upkeep and maintenance. Various experts were consulted, some of whom believed the design could not be implemented. Eventually, a feasible method was found, but the sculpture's construction fell behind schedule. It was unveiled in an incomplete form during the Millennium Park grand opening celebration in 2004, before being concealed again while it was completed. Cloud Gate was formally dedicated on May 15, 2006, and has since gained considerable popularity, both domestically and internationally.
@@ -54,6 +76,17 @@ Enjoy your delicious cake!
 From the New World (Japanese: 新世界より, Hepburn: Shin Sekai Yori) is a Japanese novel by Yusuke Kishi. It was originally published in January 2008 by Kodansha. It follows Saki who lives quietly in a beautiful and calm village and has just acquired her power at the age of twelve. She then goes to the academy to learn how to master it with other young people her age, including her friends Maria, Shun, Satoru, and Mamoru. But during an outing, the five of them will learn things they never should have known.
 The story received a manga adaptation in Kodansha's manga magazine Bessatsu Shōnen Magazine, which was serialized between May 2012 and June 2014, and an anime television series adaptation by A-1 Pictures, which aired in Japan between October 2012 and March 2013. In North America, the manga has been licensed by Vertical (itself an imprint of Kodansha USA), and the anime is licensed by Sentai Filmworks.
 In 2008, From the New World won the Grand Prize of the 29th Nihon SF Taisho Award.
+
+Pizza ingredients:
+- 500g bread flour
+- 7g instant yeast
+- 10g salt
+- 325ml warm water
+- 30ml olive oil
+- 200g tomato sauce
+- 250g fresh mozzarella
+- 8 fresh basil leaves
+Enjoy your homemade pizza!
 
 The Gates Computer Science Building, or Gates building for short, is an L-shaped building that houses the Computer Science Department as well as the Computer Systems Laboratory at 353 Jane Stanford Way, Stanford University, California. Construction on the building began in 1994 and was completed in 1996 at a cost of $36 million. It was named after Microsoft founder Bill Gates, who donated $6 million for the building's construction.
 The building is organized into an A wing (the western ell) and a B wing . It is secured by an Intellikey system. Blueprints of the building are available online. The building was designed by Robert A.M. Stern Architects of New York City.

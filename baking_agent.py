@@ -2,26 +2,28 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Any
 
 from simulation_engine.gpt_structure import gpt_request_messages
-from baking.environment import BakingEnvironment
+from baking.recipes import DEFAULT_RECIPE, get_recipe
 
 class Agent:
-  def __init__(self, name: str, description: str):
+  def __init__(self, name: str, description: str, recipe: str = DEFAULT_RECIPE):
     self.name, self.description = name, description
     self.message_history: List[Dict[str, str]] = []
-    self.env = BakingEnvironment(self)
+    self.set_recipe(recipe)
+
+  def set_recipe(self, recipe: str) -> None:
+    """Switch to a fresh kitchen for the given recipe (cake or pizza)."""
+    self.env = get_recipe(recipe)(self)
+    self.recipe = self.env.DISH
 
   def perceive(self) -> None:
     progress = self.env.get_progress()
     ingredient_summary = []
-    for group_name, ingredients in (
-      ("Dry", progress["dry_ingredients"]),
-      ("Wet", progress["wet_ingredients"]),
-    ):
+    for group in progress["ingredient_groups"]:
       amounts = ", ".join(
         f"{item['name']}: {item['current']}/{item['required']}"
-        for item in ingredients
+        for item in group["items"]
       )
-      ingredient_summary.append(f"{group_name}: {amounts}")
+      ingredient_summary.append(f"{group['title']}: {amounts}")
 
     completed_steps = [
       step["name"] for step in progress["steps"] if step["status"] == "completed"
@@ -63,26 +65,28 @@ class Agent:
     with memory_path.open("r", encoding="utf-8") as memory_file:
       memories = memory_file.read().split("\n\n")
 
-    # The memory file contains unrelated articles as well as two recipe
-    # paragraphs. Select those paragraphs by their explicit section headings
+    # The memory file contains unrelated articles as well as the recipe
+    # paragraphs. Select this recipe's paragraphs by their section headings
     # so the agent receives the recipe without the surrounding noise.
     recipe_sections = []
     for memory in memories:
       section = memory.strip()
-      if section.lower().startswith("steps:") or section.lower().startswith("vanilla cake ingredients:"):
+      if section.lower().startswith(self.env.MEMORY_HEADINGS):
         recipe_sections.append(section)
 
     return "\n\n".join(recipe_sections)
 
   def act(self) -> str:
     persona = f"""
-    You are {self.name}. {self.description} You are baking a cake right now.
-    You remember the recipe for the cake:
+    You are {self.name}. {self.description} You are baking a {self.recipe} right now.
+    You remember the recipe for the {self.recipe}:
     {self.retrieve()}
 
     Follow the recipe in order and use the current environment progress to choose the next incomplete task.
     Do not repeat completed actions or add ingredients that are already at their required amounts.
     Use exact recipe quantities. Take one action at a time.
+    If the kitchen says an ingredient amount is too much, do not add more to fix it.
+    Say you are starting over, which empties the bowls, then add each ingredient again with its exact amount.
     Speak in character, without asterisks.
     """
 

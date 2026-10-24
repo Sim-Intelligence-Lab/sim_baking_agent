@@ -5,6 +5,10 @@ let char;
 let items = {};
 let endScreenImage = null;
 let endScreenSnapshot = null;
+let scene = null;
+let currentRecipe = 'cake';
+// Bumped on every recipe start so late replies from an old session are ignored.
+let sessionId = 0;
 
 const TILE_SIZE = 16;
 const MAP_WIDTH = 8;
@@ -15,7 +19,75 @@ const HEIGHT = MAP_HEIGHT * TILE_SIZE * SCALE;
 
 const WALKABLE_TILES = [0, 98, 101, 100, 99];
 const WALKABLE_BEHIND_TILES = [110, 111, 112, 136, 137, 138];
-const FRIDGE_ITEMS = ['butter', 'milk', 'eggs'];
+const START_TILE = { x: 4, y: 5 };
+
+// Per-recipe kitchen setup. `actions` maps each environment action to the
+// walk Trang takes for it; `next` continues with the following action.
+const RECIPES = {
+  cake: {
+    subtitle: 'A little flour, a little patience, and one cake coming right up.',
+    positions: 'item-positions-cake',
+    itemMap: {
+      1: 'flour', 2: 'baking_powder', 3: 'salt', 4: 'butter', 5: 'sugar',
+      6: 'eggs', 7: 'vanilla_extract', 8: 'milk', 9: 'oven', 10: 'mixing_bowl',
+      11: 'large_bowl', 12: 'whisk', 13: 'mixer', 14: 'pans', 15: 'fridge'
+    },
+    fridgeItems: ['butter', 'milk', 'eggs'],
+    endImageFilter: 'LINEAR',
+    actions: {
+      add_ingredient: (args, next) => {
+        const ingredient = args[0];
+        const bowl = isWetIngredient(ingredient) ? 'large_bowl' : 'mixing_bowl';
+        moveCharTo(ingredient, () => moveCharTo(bowl, next));
+      },
+      use_tool: (args, next) => moveCharTo(args[0], next),
+      preheat_oven: (args, next) => moveCharTo('oven', next),
+      mix_ingredients: (args, next) => {
+        const type = args[0];
+        if (type === 'dry') {
+          moveCharTo('mixing_bowl', () => moveCharTo('whisk', next));
+        } else if (type === 'wet' || type === 'cream') {
+          moveCharTo('large_bowl', () => moveCharTo('mixer', next));
+        } else {
+          next();
+        }
+      },
+      combine_all_ingredients: (args, next) => moveCharTo('mixing_bowl', () => moveCharTo('large_bowl', next)),
+      pour_batter: (args, next) => moveCharTo('large_bowl', () => moveCharTo('pans', next)),
+      bake_cake: (args, next) => moveCharTo('pans', () => moveCharTo('oven', next)),
+      cool_cake: (args, next) => moveCharTo('oven', () => moveCharTo('pans', next)),
+      start_over: (args, next) => moveCharTo('mixing_bowl', () => moveCharTo('large_bowl', next))
+    }
+  },
+  pizza: {
+    subtitle: 'Fresh dough, bubbling cheese, and one pizza coming right up.',
+    positions: 'item-positions-pizza',
+    itemMap: {
+      1: 'flour', 2: 'yeast', 3: 'salt', 4: 'water', 5: 'olive_oil',
+      6: 'tomato_sauce', 7: 'mozzarella', 8: 'basil', 9: 'oven', 10: 'mixing_bowl',
+      11: 'rolling_pin', 12: 'pizza_pan', 13: 'pizza_cutter', 15: 'fridge'
+    },
+    fridgeItems: ['mozzarella', 'basil'],
+    endImageFilter: 'NEAREST',
+    actions: {
+      add_ingredient: (args, next) => {
+        const ingredient = args[0];
+        const target = ['tomato_sauce', 'mozzarella', 'basil'].includes(ingredient) ? 'pizza_pan' : 'mixing_bowl';
+        moveCharTo(ingredient, () => moveCharTo(target, next));
+      },
+      use_tool: (args, next) => moveCharTo(args[0], next),
+      preheat_oven: (args, next) => moveCharTo('oven', next),
+      mix_dough: (args, next) => moveCharTo('mixing_bowl', next),
+      knead_dough: (args, next) => moveCharTo('mixing_bowl', next),
+      let_dough_rise: (args, next) => moveCharTo('mixing_bowl', next),
+      roll_out_dough: (args, next) => moveCharTo('mixing_bowl', () => moveCharTo('rolling_pin', () => moveCharTo('pizza_pan', next))),
+      top_pizza: (args, next) => moveCharTo('tomato_sauce', () => moveCharTo('pizza_pan', next)),
+      bake_pizza: (args, next) => moveCharTo('pizza_pan', () => moveCharTo('oven', next)),
+      slice_pizza: (args, next) => moveCharTo('oven', () => moveCharTo('pizza_cutter', () => moveCharTo('pizza_pan', next))),
+      start_over: (args, next) => moveCharTo('mixing_bowl', next)
+    }
+  }
+};
 
 const config = {
   type: Phaser.AUTO,
@@ -56,17 +128,21 @@ function preload() {
   this.load.tilemapCSV('kitchen-map', 'static/assets/kitchen_tilemap.csv');
   this.load.spritesheet('char', 'static/assets/char_spritesheet.png', { frameWidth: 32, frameHeight: 32 });
   
-  ['flour', 'baking_powder', 'salt', 'butter', 'sugar', 'eggs', 
-   'vanilla_extract', 'milk', 'mixing_bowl', 'large_bowl', 
-   'whisk', 'mixer', 'pans'].forEach(item => 
-    this.load.image(item, `static/assets/${item}.png`)
-  );
-  this.load.tilemapCSV('item-positions', 'static/assets/item_positions.csv');
-  this.load.image('success_cake', 'static/assets/success_cake.png');
-  this.load.image('bad_cake', 'static/assets/bad_cake.png');
+  const itemImages = new Set();
+  Object.values(RECIPES).forEach(recipe => Object.values(recipe.itemMap).forEach(item => {
+    if (item !== 'oven' && item !== 'fridge') itemImages.add(item);
+  }));
+  itemImages.forEach(item => this.load.image(item, `static/assets/${item}.png`));
+  this.load.tilemapCSV('item-positions-cake', 'static/assets/item_positions.csv');
+  this.load.tilemapCSV('item-positions-pizza', 'static/assets/pizza_item_positions.csv');
+  Object.keys(RECIPES).forEach(recipe => {
+    this.load.image(`success_${recipe}`, `static/assets/success_${recipe}.png`);
+    this.load.image(`bad_${recipe}`, `static/assets/bad_${recipe}.png`);
+  });
 }
 
 function create() {
+  scene = this;
   const map = this.make.tilemap({ key: 'kitchen-map', tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
   const tileset = map.addTilesetImage('tiles', 'tiles', TILE_SIZE, TILE_SIZE);
   const layer = map.createLayer(0, tileset, 0, 0).setScale(SCALE);
@@ -75,16 +151,30 @@ function create() {
     if (texture) texture.setFilter(Phaser.Textures.NEAREST);
   });
   window.gameLayer = layer.setDepth(100);
-  char = this.physics.add.sprite(4 * TILE_SIZE * SCALE + (TILE_SIZE * SCALE / 2), 5 * TILE_SIZE * SCALE + (TILE_SIZE * SCALE / 2), 'char', 0)
+  char = this.physics.add.sprite(tileCenter(START_TILE.x), tileCenter(START_TILE.y), 'char', 0)
     .setScale(SCALE / 2);
   if (char.texture) char.texture.setFilter(Phaser.Textures.NEAREST);
 
   createAnimations.call(this);
   char.play('idle_front');
-  const itemPositionsMap = this.make.tilemap({ key: 'item-positions', tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
   updateCharacterDepth();
-  createItems.call(this, itemPositionsMap);
+  createItems(currentRecipe);
   createDebugGrid.call(this);
+}
+
+function tileCenter(tile) {
+  return tile * TILE_SIZE * SCALE + (TILE_SIZE * SCALE / 2);
+}
+
+// Put Trang back at the start and lay out the kitchen for a recipe.
+function resetKitchen(recipeKey) {
+  if (!scene) return;
+  restoreEndScreen();
+  scene.tweens.killTweensOf(char);
+  char.setPosition(tileCenter(START_TILE.x), tileCenter(START_TILE.y));
+  char.play('idle_front');
+  updateCharacterDepth();
+  createItems(recipeKey);
 }
 
 function createAnimations() {
@@ -104,43 +194,37 @@ function createAnimations() {
   });
 }
 
-function createItems(itemPositionsMap) {
+function createItems(recipeKey) {
+  Object.values(items).forEach(item => {
+    if (item && item.destroy) item.destroy();
+  });
+  items = {};
+
+  const recipe = RECIPES[recipeKey];
+  const itemPositionsMap = scene.make.tilemap({ key: recipe.positions, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
   for (let y = 0; y < MAP_HEIGHT; y++) {
     for (let x = 0; x < MAP_WIDTH; x++) {
       const tile = itemPositionsMap.getTileAt(x, y);
-      if (tile) {
-        const itemName = getItemName(tile.index);
-        if (itemName) {
-          const itemX = x * TILE_SIZE * SCALE + (TILE_SIZE * SCALE / 2);
-          const itemY = y * TILE_SIZE * SCALE + (TILE_SIZE * SCALE / 2);
-          
-          if (itemName === 'oven' || itemName === 'fridge') {
-            items[itemName] = { x: itemX, y: itemY };
-          } else {
-            items[itemName] = this.add.image(itemX, itemY, itemName)
-              .setScale(SCALE)
-              .setVisible(false);
-            
-            if (items[itemName].texture) {
-              items[itemName].texture.setFilter(Phaser.Textures.NEAREST);
-            }
-            
-            const mapTile = window.gameLayer.getTileAt(x, y);
-            items[itemName].setDepth(mapTile && WALKABLE_BEHIND_TILES.includes(mapTile.index) ? 150 : 200);
-          }
-        }
+      const itemName = tile && recipe.itemMap[tile.index];
+      if (!itemName) continue;
+
+      const itemX = tileCenter(x);
+      const itemY = tileCenter(y);
+      if (itemName === 'oven' || itemName === 'fridge') {
+        items[itemName] = { x: itemX, y: itemY };
+        continue;
       }
+
+      items[itemName] = scene.add.image(itemX, itemY, itemName)
+        .setScale(SCALE)
+        .setVisible(false);
+      if (items[itemName].texture) {
+        items[itemName].texture.setFilter(Phaser.Textures.NEAREST);
+      }
+      const mapTile = window.gameLayer.getTileAt(x, y);
+      items[itemName].setDepth(mapTile && WALKABLE_BEHIND_TILES.includes(mapTile.index) ? 150 : 200);
     }
   }
-}
-
-function getItemName(index) {
-  const itemMap = {
-    1: 'flour', 2: 'baking_powder', 3: 'salt', 4: 'butter', 5: 'sugar',
-    6: 'eggs', 7: 'vanilla_extract', 8: 'milk', 9: 'oven', 10: 'mixing_bowl',
-    11: 'large_bowl', 12: 'whisk', 13: 'mixer', 14: 'pans', 15: 'fridge'
-  };
-  return itemMap[index];
 }
 
 function createDebugGrid() {
@@ -156,73 +240,100 @@ function createDebugGrid() {
 function update() {}
 
 let isAutoProgressEnabled = false;
-let autoProgressInterval;
+let autoProgressTimer = null;
 let isStepRequestPending = false;
 let isGameCompleted = false;
+// Bumped whenever a step is shown so an older walk animation stops early.
+let animationToken = 0;
+
+// Play pacing: pause after a new step lands, and between replayed steps.
+const AUTO_NEW_STEP_DELAY = 1500;
+const AUTO_REPLAY_DELAY = 3000;
+
+function latestStep() {
+  return gameStates.length - 1;
+}
 
 function requestNextStep() {
   if (isStepRequestPending || isGameCompleted) return;
 
+  const requestSession = sessionId;
   isStepRequestPending = true;
-  updateNavigationButtons();
+  refreshControls();
   $.post('/next_step')
     .done(function(data) {
+      if (requestSession !== sessionId) return;
+      isStepRequestPending = false;
       updateGameState(data);
-      if (data.completed) stopAutoProgress();
+      if (data.completed) {
+        stopAutoProgress();
+      } else if (isAutoProgressEnabled) {
+        scheduleAutoProgress(AUTO_NEW_STEP_DELAY);
+      }
     })
     .fail(function() {
+      if (requestSession !== sessionId) return;
+      isStepRequestPending = false;
+      stopAutoProgress();
       typeWriter('The baking step could not be reached. Please try again.', 'speech-box');
     })
     .always(function() {
-      isStepRequestPending = false;
-      updateNavigationButtons();
+      if (requestSession !== sessionId) return;
+      refreshControls();
     });
 }
 
-function autoProgress() {
-  if (isStepRequestPending) return;
+function scheduleAutoProgress(delay) {
+  clearTimeout(autoProgressTimer);
+  autoProgressTimer = setTimeout(autoProgress, delay);
+}
 
-  if (currentStep < gameStates.length - 1) {
+function autoProgress() {
+  if (!isAutoProgressEnabled || isStepRequestPending) return;
+
+  if (currentStep < latestStep()) {
+    // Replaying steps already fetched, e.g. after browsing back.
     currentStep++;
     showTimelineState(currentStep);
+    refreshControls();
+    if (isAutoProgressEnabled) scheduleAutoProgress(AUTO_REPLAY_DELAY);
   } else if (isGameCompleted) {
     stopAutoProgress();
   } else {
+    // requestNextStep schedules the next tick when the reply arrives.
     requestNextStep();
   }
-  updateNavigationButtons();
-  updateCurrentStepDisplay();
 }
 
 function startAutoProgress() {
-  if (isAutoProgressEnabled || (isGameCompleted && currentStep >= gameStates.length - 1)) return;
+  if (isAutoProgressEnabled || gameStates.length === 0) return;
+  if (isGameCompleted && currentStep >= latestStep()) return;
   isAutoProgressEnabled = true;
-  $('#auto-progress').text('Pause Simulation').addClass('active');
-  $('#auto-progress').attr('aria-pressed', 'true');
-  autoProgressInterval = setInterval(autoProgress, 8000);
+  refreshControls();
+  autoProgress();
 }
 
 function stopAutoProgress() {
   isAutoProgressEnabled = false;
-  $('#auto-progress').text('Play Simulation').removeClass('active');
-  $('#auto-progress').attr('aria-pressed', 'false');
-  clearInterval(autoProgressInterval);
+  clearTimeout(autoProgressTimer);
+  autoProgressTimer = null;
+  refreshControls();
 }
 
 function updateGameState(data) {
   // Ignore responses already in flight when a completed response arrived.
   if (isGameCompleted) return;
   isGameCompleted = Boolean(data.completed);
-  if (gameStates.length === 0) {
-    gameStates.push(data);
-    currentStep = 0;
-  } else {
-    gameStates.push(data);
-    currentStep = gameStates.length - 1;
+
+  // Follow the new step if the viewer was on the latest one (or playing).
+  // If they browsed back, keep their place and just update the counter.
+  const wasAtLatest = currentStep >= latestStep();
+  gameStates.push(data);
+  if (gameStates.length === 1 || wasAtLatest || isAutoProgressEnabled) {
+    currentStep = latestStep();
+    showTimelineState(currentStep);
   }
-  showTimelineState(currentStep);
-  updateNavigationButtons();
-  updateCurrentStepDisplay();
+  refreshControls();
 }
 
 function showTimelineState(index) {
@@ -232,15 +343,13 @@ function showTimelineState(index) {
   displayGameState(state);
   if (state.completed) {
     const finalMessage = state.final_message || state.agent_message || "The baking session has ended.";
-    const endGameStatus = finalMessage.includes("successfully baked") ? 'success' :
-                          finalMessage.includes("mistakes with the ingredients") ? 'bad' :
-                          finalMessage.includes("taken too long") ? 'timeout' : 'neutral';
-    endGame(finalMessage, endGameStatus);
+    endGame(finalMessage, state.result || 'neutral');
   }
 }
 
 function displayGameState(state) {
   restoreEndScreen();
+  stopWalking();
   typeWriter(state.agent_message || state.message, 'speech-box');
   
   let feedbackHtml = '';
@@ -260,7 +369,7 @@ function displayGameState(state) {
     ).join('');
   }
   
-  $('#feedback').html(feedbackHtml);
+  $('#feedback').html(feedbackHtml || 'Nothing yet. Notes show up after each of Trang\'s steps.');
   
   if (state.executed_actions && state.executed_actions.length > 0) {
     processExecutedActions(state.executed_actions);
@@ -280,45 +389,35 @@ function formatAction(action) {
   return formattedAction.charAt(0).toUpperCase() + formattedAction.slice(1);
 }
 
+// Stop Trang mid-walk and snap her to the tile she is on.
+function stopWalking() {
+  animationToken++;
+  if (!scene || !char) return;
+  scene.tweens.killTweensOf(char);
+  char.setPosition(
+    tileCenter(Math.floor(char.x / (TILE_SIZE * SCALE))),
+    tileCenter(Math.floor(char.y / (TILE_SIZE * SCALE)))
+  );
+  char.play('idle_front');
+  updateCharacterDepth();
+}
+
 function processExecutedActions(executedActions) {
-  let actionQueue = [...executedActions];
-  
+  const actionQueue = [...executedActions];
+  const actionMap = RECIPES[currentRecipe].actions;
+  const token = animationToken;
+
   function processNextAction() {
-    if (actionQueue.length > 0) {
-      const action = actionQueue.shift();
-      const actionMap = {
-        'add_ingredient': (args) => {
-          const ingredient = args[0];
-          const bowl = isWetIngredient(ingredient) ? 'large_bowl' : 'mixing_bowl';
-          moveCharTo(ingredient, () => moveCharTo(bowl, processNextAction));
-        },
-        'use_tool': (args) => moveCharTo(args[0], processNextAction),
-        'preheat_oven': () => moveCharTo('oven', processNextAction),
-        'mix_ingredients': (args) => {
-          const type = args[0];
-          if (type === "dry") {
-            moveCharTo('mixing_bowl', () => moveCharTo('whisk', processNextAction));
-          } else if (type === "wet" || type === "cream") {
-            moveCharTo('large_bowl', () => moveCharTo('mixer', processNextAction));
-          } else {
-            processNextAction();
-          }
-        },
-        'combine_all_ingredients': () => moveCharTo('mixing_bowl', () => moveCharTo('large_bowl', processNextAction)),
-        'pour_batter': () => moveCharTo('large_bowl', () => moveCharTo('pans', processNextAction)),
-        'bake_cake': () => moveCharTo('pans', () => moveCharTo('oven', processNextAction)),
-        'cool_cake': () => moveCharTo('oven', () => moveCharTo('pans', processNextAction))
-      };
-      
-      if (actionMap[action.name]) {
-        actionMap[action.name](action.args);
-      } else {
-        console.log(`Unknown action: ${action.name}`);
-        processNextAction();
-      }
+    if (token !== animationToken || actionQueue.length === 0) return;
+    const action = actionQueue.shift();
+    if (actionMap[action.name]) {
+      actionMap[action.name](action.args, processNextAction);
+    } else {
+      console.log(`Unknown action: ${action.name}`);
+      processNextAction();
     }
   }
-  
+
   processNextAction();
 }
 
@@ -395,7 +494,7 @@ function moveCharTo(itemName, callback) {
     } else if (nextCallback) nextCallback();
   }
 
-  if (FRIDGE_ITEMS.includes(itemName)) {
+  if (RECIPES[currentRecipe].fridgeItems.includes(itemName)) {
     if (items['fridge']) {
       targetX = Math.floor(items['fridge'].x / (TILE_SIZE * SCALE));
       targetY = Math.floor(items['fridge'].y / (TILE_SIZE * SCALE));
@@ -480,13 +579,26 @@ function updateCharacterDepth() {
 
 function updateNavigationButtons() {
   const hasStates = gameStates.length > 0;
-  const atLatestState = currentStep >= gameStates.length - 1;
-  const currentState = hasStates ? gameStates[currentStep] : null;
-  $('#prev-step').prop('disabled', isStepRequestPending || !hasStates || currentStep <= 0);
+  const atLatest = currentStep >= latestStep();
+  // Browsing steps already fetched works even while Trang is thinking.
+  $('#prev-step').prop('disabled', !hasStates || currentStep <= 0);
   $('#next-step').prop(
     'disabled',
-    isStepRequestPending || !hasStates || (atLatestState && Boolean(currentState && currentState.completed))
+    !hasStates || (atLatest && (isStepRequestPending || isGameCompleted))
   );
+  $('.recipe-option').prop('disabled', isStepRequestPending);
+
+  const canPlay = hasStates && !(isGameCompleted && atLatest);
+  $('#auto-progress')
+    .text(isAutoProgressEnabled ? 'Pause Simulation' : 'Play Simulation')
+    .toggleClass('active', isAutoProgressEnabled)
+    .attr('aria-pressed', String(isAutoProgressEnabled))
+    .prop('disabled', !isAutoProgressEnabled && !canPlay);
+}
+
+function refreshControls() {
+  updateNavigationButtons();
+  updateCurrentStepDisplay();
 }
 
 function updateProgress(progress) {
@@ -510,17 +622,24 @@ function updateProgress(progress) {
     $('#steps').append(li);
   });
 
-  $('#dry-ingredients').empty().append(
-    progress.dry_ingredients.map(ing => 
-      `<li>${ing.name}: ${ing.current}/${ing.required}</li>`
-    ).join('')
-  );
-
-  $('#wet-ingredients').empty().append(
-    progress.wet_ingredients.map(ing => 
-      `<li>${ing.name}: ${ing.current}/${ing.required}</li>`
-    ).join('')
-  );
+  const groups = $('#ingredient-groups').empty();
+  (progress.ingredient_groups || []).forEach(function(group) {
+    const section = $('<section class="ingredient-section">');
+    section.append($('<h3>').text(group.title));
+    const list = $('<ul class="ingredient-list">');
+    group.items.forEach(function(ing) {
+      const fill = ing.required ? Math.min(ing.current / ing.required, 1) * 100 : 0;
+      list.append($('<li>')
+        .css('--fill', `${fill}%`)
+        .toggleClass('done', ing.current === ing.required)
+        .toggleClass('over', ing.current > ing.required)
+        .append(
+          $('<span>').text(ing.name),
+          $('<span>').text(`${ing.current}/${ing.required}`)
+        ));
+    });
+    groups.append(section.append(list));
+  });
 }
 
 function testCharacterMovement() {
@@ -565,20 +684,8 @@ function endGame(message, status = 'neutral') {
   stopAutoProgress();
   updateNavigationButtons();
   
-  let imageName;
-  switch(status) {
-    case 'success':
-      imageName = 'success_cake';
-      break;
-    case 'timeout':
-      imageName = null;
-      break;
-    case 'bad':
-      imageName = 'bad_cake';
-      break;
-    default:
-      imageName = null;
-  }
+  const imageName = status === 'success' ? `success_${currentRecipe}` :
+                    status === 'bad' ? `bad_${currentRecipe}` : null;
   
   if (imageName) {
     displayEndImage(imageName);
@@ -588,7 +695,6 @@ function endGame(message, status = 'neutral') {
 }
 
 function displayEndImage(imageName) {
-  const scene = game.scene.scenes[0];
   endScreenSnapshot = scene.children.list.map(child => [child, child.visible]);
   endScreenSnapshot.forEach(([child]) => {
     child.setVisible(false);
@@ -601,7 +707,7 @@ function displayEndImage(imageName) {
   endScreenImage.setVisible(true);
 
   if (endScreenImage.texture) {
-    endScreenImage.texture.setFilter(Phaser.Textures.LINEAR);
+    endScreenImage.texture.setFilter(Phaser.Textures[RECIPES[currentRecipe].endImageFilter]);
   }
 }
 
@@ -616,7 +722,7 @@ function restoreEndScreen() {
     if (child.active) child.setVisible(wasVisible);
   });
   endScreenSnapshot = null;
-  game.scene.scenes[0].cameras.main.setBackgroundColor('#eef3ef');
+  scene.cameras.main.setBackgroundColor('#eef3ef');
 }
 
 function updateCurrentStepDisplay() {
@@ -624,37 +730,87 @@ function updateCurrentStepDisplay() {
     $('#current-step').text('Preparing the kitchen…');
     return;
   }
-  $('#current-step').text(`Step ${currentStep} of ${Math.max(0, gameStates.length - 1)}`);
+  let text = `Step ${currentStep} of ${Math.max(0, latestStep())}`;
+  if (isStepRequestPending) {
+    text += ' · Trang is thinking…';
+  } else if (currentStep < latestStep()) {
+    text += ' · viewing an earlier step';
+  } else if (isGameCompleted) {
+    text += ' · finished';
+  }
+  $('#current-step').text(text);
 }
 
+// Manual Next/Previous take over from Play.
 function goToNextStep() {
-  if (isStepRequestPending || isGameCompleted && currentStep >= gameStates.length - 1) return;
-
-  if (currentStep < gameStates.length - 1) {
+  stopAutoProgress();
+  if (currentStep < latestStep()) {
     currentStep++;
     showTimelineState(currentStep);
-  } else {
+  } else if (!isStepRequestPending && !isGameCompleted) {
     requestNextStep();
   }
-  updateNavigationButtons();
-  updateCurrentStepDisplay();
+  refreshControls();
 }
 
 function goToPreviousStep() {
-  if (isStepRequestPending || currentStep <= 0) return;
-
+  stopAutoProgress();
+  if (currentStep <= 0) return;
   currentStep--;
   showTimelineState(currentStep);
-  updateNavigationButtons();
-  updateCurrentStepDisplay();
+  refreshControls();
+}
+
+function startRecipe(recipeKey) {
+  if (!RECIPES[recipeKey] || isStepRequestPending) return;
+
+  stopAutoProgress();
+  sessionId++;
+  const requestSession = sessionId;
+  currentRecipe = recipeKey;
+  gameStates = [];
+  currentStep = 0;
+  isGameCompleted = false;
+
+  $('.recipe-option').each(function() {
+    $(this).attr('aria-pressed', String($(this).data('recipe') === recipeKey));
+  });
+  $('.app-subtitle').text(RECIPES[recipeKey].subtitle);
+  $('#feedback').text("Trang's feedback will appear here.");
+  typeWriter('Getting the kitchen ready…', 'speech-box');
+  resetKitchen(recipeKey);
+
+  isStepRequestPending = true;
+  refreshControls();
+  $.ajax({
+    url: '/start_baking',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({ recipe: recipeKey })
+  })
+    .done(function(data) {
+      if (requestSession !== sessionId) return;
+      isStepRequestPending = false;
+      updateGameState(data);
+    })
+    .fail(function() {
+      if (requestSession !== sessionId) return;
+      isStepRequestPending = false;
+      typeWriter('The kitchen could not be reached. Please refresh the page.', 'speech-box');
+    })
+    .always(function() {
+      if (requestSession !== sessionId) return;
+      refreshControls();
+    });
 }
 
 $(document).ready(function() {
 
-  $.post('/start_baking', function(data) {
-    isGameCompleted = false;
-    updateGameState(data);
-    updateNavigationButtons();
+  startRecipe(currentRecipe);
+
+  $('.recipe-option').click(function() {
+    const recipeKey = $(this).data('recipe');
+    if (recipeKey !== currentRecipe) startRecipe(recipeKey);
   });
 
   $('#next-step').click(goToNextStep);

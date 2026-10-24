@@ -1,3 +1,5 @@
 Flask==2.3.2
 openai==1.6.0
 PyPDF2==3.0.1
+# openai 1.6 breaks with httpx 0.28+ ("unexpected keyword argument 'proxies'")
+httpx<0.28

@@ -1,6 +1,6 @@
 # Sim Baking Agent
 
-A Flask baking game starring Trang. The agent follows a cake recipe, while the environment tracks ingredients, tools, and each baking step.
+A Flask baking game starring Trang. Pick a vanilla cake or a pizza in the Step Controls panel; the agent follows that recipe from memory, while the environment tracks ingredients, tools, and each baking step.
 
 ## Quick start
 
@@ -36,11 +36,15 @@ python baking_app.py
 ├── requirements.txt
 ├── baking_app.py                  # Flask routes and app setup
 ├── baking_agent.py                # Agent behavior and recipe retrieval
+├── scripts/
+│   └── draw_pizza_art.py          # Redraws the pizza pixel art (needs Pillow)
 ├── baking/
-│   ├── environment.py             # Baking rules and state
+│   ├── environment.py             # Shared kitchen rules and the cake recipe
+│   ├── pizza_environment.py       # Pizza recipe rules
+│   ├── recipes.py                 # Recipe name -> kitchen lookup
 │   ├── trang/
 │   │   ├── agent.json             # Agent name and persona
-│   │   └── memory/memory_stream.txt  # Mixed memories, including the recipe
+│   │   └── memory/memory_stream.txt  # Mixed memories, including both recipes
 │   ├── templates/index.html       # Game page
 │   └── static/
 │       ├── game.js                # Browser game logic
@@ -48,6 +52,15 @@ python baking_app.py
 └── simulation_engine/
     ├── gpt_structure.py           # OpenAI-compatible model requests
     └── settings.py                # Backend and model configuration
+```
+
+## Pizza art
+
+The pizza item sprites and end screens are drawn by code. To tweak one, edit its grid in `scripts/draw_pizza_art.py` and run:
+
+```bash
+pip install pillow
+python scripts/draw_pizza_art.py
 ```
 
 ## Repository
