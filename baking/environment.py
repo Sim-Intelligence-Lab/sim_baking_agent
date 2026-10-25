@@ -121,7 +121,7 @@ class KitchenEnvironment:
 
         return attempted_actions, executed_actions, self.feedbacks
 
-    START_OVER_WORDS = ("start over", "clear", "empty", "throw out", "discard")
+    START_OVER_WORDS = ("start over", "start fresh", "clear the bowl", "clear mixing", "throw out", "discard")
 
     def _is_start_over(self, processed_action: str) -> bool:
         return any(word in processed_action for word in self.START_OVER_WORDS)
@@ -271,6 +271,13 @@ class KitchenEnvironment:
     def start_over(self) -> None:
         """Empty the bowls: ingredients and mixing steps reset, but the
         preheated oven and prepared pan stay ready."""
+        # Only a real overfill needs a reset. Phrases like "empty the dough onto
+        # the counter" must not wipe out good progress.
+        if not any(d["current"] > d["required"] for d in self.ingredients.values()):
+            raise ActionRefused(
+                "No need to start over: no ingredient is over its recipe amount. "
+                "Keep going with the next step."
+            )
         for data in self.ingredients.values():
             data["current"] = 0
         self.steps_completed &= {"preheat_oven", self.PAN_STEP}

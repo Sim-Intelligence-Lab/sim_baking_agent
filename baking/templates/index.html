@@ -148,7 +148,7 @@
             transition: background-color .12s ease;
         }
         .recipe-option img { width: 22px; height: 22px; }
-        .recipe-option:hover:not(:disabled) { background: var(--cream-2); }
+        .recipe-option:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--cream-2); }
         .recipe-option[aria-pressed="true"] { background: var(--black); color: var(--cream); }
         .recipe-option[aria-pressed="true"] .square { background: var(--pink); }
         .recipe-option:disabled { cursor: wait; }
