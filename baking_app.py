@@ -1,8 +1,9 @@
 import json
 import os
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 from baking_agent import Agent
+from baking.recipes import DEFAULT_RECIPE, RECIPES
 
 def init_agent() -> Agent:
     agent_path = os.path.join("baking", "trang", "agent.json")
@@ -30,11 +31,13 @@ def index():
 def start_baking():
     global current_step
     current_step = 0
-    agent.env.reset()
-    initial_message = "Hi there! I'm Trang, and I absolutely love baking. I'm so excited to bake a cake today!"
+    recipe = str((request.get_json(silent=True) or {}).get("recipe", DEFAULT_RECIPE))
+    agent.set_recipe(recipe if recipe in RECIPES else DEFAULT_RECIPE)
+    initial_message = f"Hi there! I'm {agent.name}, and I absolutely love baking. I'm so excited to bake a {agent.recipe} today!"
     agent.message_history = [{"role": "assistant", "content": initial_message}]
     
     return jsonify({
+        "recipe": agent.recipe,
         "message": initial_message,
         "progress": agent.env.get_progress(),
         "completed": False,
@@ -54,9 +57,13 @@ def next_step():
         progress = agent.env.get_progress()
         
         if agent.env._all_steps_completed():
-            final_message = "Wonderful! We've successfully baked the cake. Let's enjoy it!" if agent.env.check_final_ingredients() else "Hmm... it seems we made some mistakes with the ingredients and the cake tastes... not so good. Let's try again next time!"
+            dish = agent.recipe
+            succeeded = agent.env.check_final_ingredients()
+            final_message = f"Wonderful! We've successfully baked the {dish}. Let's enjoy it!" if succeeded else f"Hmm... it seems we made some mistakes with the ingredients and the {dish} tastes... not so good. Let's try again next time!"
             agent.message_history.append({"role": "assistant", "content": final_message})
             return jsonify({
+                "recipe": dish,
+                "result": "success" if succeeded else "bad",
                 "agent_message": agent_message,
                 "final_message": final_message,
                 "progress": progress,
@@ -67,6 +74,7 @@ def next_step():
             })
         
         return jsonify({
+            "recipe": agent.recipe,
             "agent_message": agent_message,
             "progress": progress,
             "completed": False,
@@ -75,8 +83,10 @@ def next_step():
             "executed_actions": executed_actions
         })
     else:
-        timeout_message = "Oh dear, it seems we've taken too long to bake the cake. Let's try again another time!"
+        timeout_message = f"Oh dear, it seems we've taken too long to bake the {agent.recipe}. Let's try again another time!"
         return jsonify({
+            "recipe": agent.recipe,
+            "result": "timeout",
             "agent_message": timeout_message,
             "final_message": timeout_message,
             "progress": agent.env.get_progress(),

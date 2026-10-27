@@ -3,7 +3,32 @@ from typing import List, Tuple, Dict, Any, Optional
 
 from simulation_engine.gpt_structure import gpt_request
 
-class BakingEnvironment:
+
+class ActionRefused(Exception):
+    """An action the kitchen turned down; the message is sent as feedback."""
+
+
+class KitchenEnvironment:
+    """Shared kitchen rules. Each recipe subclass fills in the class settings
+    below and adds its own actions."""
+
+    DISH = ""
+    # Section headings in the agent's memory file that hold this recipe.
+    MEMORY_HEADINGS: Tuple[str, ...] = ()
+    INGREDIENTS: Dict[str, int] = {}
+    # (title shown in the UI, ingredient names) in display order.
+    INGREDIENT_GROUPS: List[Tuple[str, List[str]]] = []
+    INGREDIENT_ALIASES: Dict[str, Tuple[str, ...]] = {}
+    TOOLS: List[str] = []
+    STEPS: List[str] = []
+    # Steps that list the tools they need in the progress panel.
+    STEP_TOOLS: Dict[str, List[Tuple[str, str]]] = {}
+    PAN_TOOL = ""
+    PAN_STEP = ""
+    PAN_MESSAGE = ""
+    # Recipe step actions, listed back to the agent when a phrase matches nothing.
+    ACTION_HINT = ""
+
     def __init__(self, agent):
         self.agent = agent
         self.feedbacks = []
@@ -12,19 +37,39 @@ class BakingEnvironment:
     def reset(self) -> None:
         self.state = "initial"
         self.ingredients = {
-            i: {"required": r, "current": 0} for i, r in zip(
-                ["flour", "baking_powder", "salt", "butter", "sugar", "eggs", "vanilla_extract", "milk"],
-                [250, 2, 1, 230, 300, 4, 2, 240]
-            )
+            name: {"required": required, "current": 0}
+            for name, required in self.INGREDIENTS.items()
         }
-        self.tools = {t: {"used": False, "preheated" if t == "oven" else "prepared" if t == "pans" else None: False} for t in ["oven", "mixing_bowl", "large_bowl", "whisk", "mixer", "pans"]}
+        self.tools = {tool: {"used": False} for tool in self.TOOLS}
+        self.tools["oven"]["preheated"] = False
+        self.tools[self.PAN_TOOL]["prepared"] = False
         self.steps_completed = set()
         self.oven_temperature = None
-        self.dry_mixed = self.wet_mixed = self.cream_done = False
+        self._reset_mixing_state()
+
+    def _reset_mixing_state(self) -> None:
+        """Hook for recipe-specific flags that start over with the bowls."""
 
     def _send_feedback(self, message: str) -> None:
         self.feedbacks.append(message)
         self.agent.message_history.append({"role": "user", "content": message})
+
+    # -- Action parsing -----------------------------------------------------
+
+    def _action_prompt_rules(self) -> str:
+        """Recipe-specific lines for the action extraction prompt."""
+        raise NotImplementedError
+
+    def _detect_actions(self, processed_action: str) -> Optional[List[Tuple[callable, Tuple]]]:
+        """Map one simple lowercase action to environment calls. Return None
+        when the phrase matches no kitchen action."""
+        raise NotImplementedError
+
+    def _after_detect(self, detected_actions: List[Tuple[callable, Tuple]]) -> None:
+        """Hook for recipes that infer extra actions from a whole turn."""
+
+    def _sort_actions(self, actions: List[Tuple[callable, Tuple]]) -> List[Tuple[callable, Tuple]]:
+        return actions
 
     def process_action(self, action: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
         self.feedbacks = []
@@ -38,48 +83,23 @@ class BakingEnvironment:
                 "I couldn't interpret that action because the language model request failed. Please try again."
             )
             return [], [], self.feedbacks
-        
+
         detected_actions = []
         for processed_action in processed_actions.split(','):
-            processed_action = processed_action.strip().lower()
-            
-            if 'bake cake' in processed_action:
-                detected_actions.append((self.bake_cake, ()))
-            elif 'pour batter' in processed_action:
-                detected_actions.append((self.pour_batter, ()))
-            elif 'preheat oven' in processed_action:
-                match = re.search(r'(\d+)', processed_action)
-                if match:
-                    temperature = int(match.group(1))
-                    detected_actions.append((self.preheat_oven, (temperature,)))
-            elif 'cream' in processed_action:
-                detected_actions.append((self.mix_ingredients, ("cream",)))
-            elif 'combine all ingredients' in processed_action:
-                detected_actions.append((self.combine_all_ingredients, ()))
-            elif 'mix dry ingredients' in processed_action:
-                detected_actions.append((self.mix_ingredients, ("dry",)))
-            elif 'mix wet ingredients' in processed_action:
-                detected_actions.append((self.mix_ingredients, ("wet",)))
-            elif 'add' in processed_action:
-                ingredient_add = self._parse_ingredient_add(processed_action)
-                if ingredient_add:
-                    ingredient, amount = ingredient_add
-                    detected_actions.append((self.add_ingredient, (ingredient, amount)))
-                else:
-                    self._send_feedback(
-                        f"I couldn't identify a valid ingredient and quantity in: {processed_action}"
-                    )
-            elif 'get' in processed_action or 'use' in processed_action:
-                match = re.search(r'(mixing[_ ]bowl|large[_ ]bowl|whisk|mixer|pans|oven)', processed_action)
-                if match:
-                    tool = match.group(1)
-                    detected_actions.append((self.use_tool, (tool,)))
-            elif 'cool' in processed_action:
-                detected_actions.append((self.cool_cake, ()))
-
-        if any(func.__name__ == 'mix_ingredients' and args[0] == 'dry' for func, args in detected_actions) and \
-           any(func.__name__ == 'mix_ingredients' and args[0] == 'wet' for func, args in detected_actions):
-            detected_actions.append((self.combine_all_ingredients, ()))
+            text = processed_action.strip().strip('"\'.').lower()
+            if not text:
+                continue
+            found = self._detect_actions(text)
+            if found is None:
+                # Say so instead of silently skipping, so the agent can rephrase
+                # rather than repeating the same plan forever.
+                self._send_feedback(
+                    f"Nothing happened for \"{text}\". Kitchen actions are: add [amount] [ingredient], "
+                    f"use [tool], start over, preheat oven to [degrees], {self.ACTION_HINT}."
+                )
+            else:
+                detected_actions.extend(found)
+        self._after_detect(detected_actions)
 
         sorted_actions = self._sort_actions(detected_actions)
         attempted_actions = []
@@ -91,6 +111,8 @@ class BakingEnvironment:
             try:
                 action_func(*args)
                 executed_actions.append(attempted_action)
+            except ActionRefused as e:
+                self._send_feedback(str(e))
             except Exception as e:
                 self._send_feedback(f"Failed to execute {action_func.__name__}: {str(e)}")
 
@@ -99,6 +121,20 @@ class BakingEnvironment:
 
         return attempted_actions, executed_actions, self.feedbacks
 
+    START_OVER_WORDS = ("start over", "start fresh", "clear the bowl", "clear mixing", "throw out", "discard")
+
+    def _is_start_over(self, processed_action: str) -> bool:
+        return any(word in processed_action for word in self.START_OVER_WORDS)
+
+    def _detect_ingredient_add(self, processed_action: str) -> List[Tuple[callable, Tuple]]:
+        ingredient_add = self._parse_ingredient_add(processed_action)
+        if ingredient_add:
+            return [(self.add_ingredient, ingredient_add)]
+        self._send_feedback(
+            f"I couldn't identify a valid ingredient and quantity in: {processed_action}"
+        )
+        return []
+
     def _parse_ingredient_add(self, action: str) -> Optional[Tuple[str, int]]:
         """Find a recipe ingredient and quantity even when units are included."""
         normalized_action = action.lower().replace('_', ' ')
@@ -106,12 +142,9 @@ class BakingEnvironment:
         if not amount_match:
             return None
 
-        aliases = {
-            "eggs": ("egg", "eggs"),
-        }
         candidates = []
         for ingredient in self.ingredients:
-            names = aliases.get(ingredient, (ingredient.replace('_', ' '),))
+            names = self.INGREDIENT_ALIASES.get(ingredient, (ingredient.replace('_', ' '),))
             candidates.extend((name, ingredient) for name in names)
 
         for name, ingredient in sorted(candidates, key=lambda candidate: len(candidate[0]), reverse=True):
@@ -128,7 +161,168 @@ class BakingEnvironment:
         Valid ingredients are: {', '.join(ingredient.replace(' ', '_') for ingredient in self.ingredients.keys())}
         - For getting or using tools: "get / use [tool name]"
         Valid tools are: {', '.join(tool.replace(' ', '_') for tool in self.tools.keys() if tool != 'oven')}
-        - For mixing: "mix dry ingredients", "mix wet ingredients", "cream butter and sugar", "combine all ingredients"
+        - To throw out everything in the bowls and begin again: "start over"
+        {self._action_prompt_rules()}
+
+        Rules:
+        - Only list actions the baker is doing in this message. Skip actions they say are already done or that they will do later.
+        - Pair each quantity with the ingredient named right next to it. "add the 325ml of warm water" is "add 325 water".
+
+        Input: {action}
+        """
+        response = gpt_request(prompt, model="gpt-4o", max_tokens=100)
+        return response
+
+    # -- Progress -----------------------------------------------------------
+
+    def get_progress(self) -> Dict[str, Any]:
+        progress = {"steps": [], "ingredient_groups": []}
+
+        for step in self.STEPS:
+            status = "completed" if step in self.steps_completed else "incomplete"
+            entry = {"name": step.replace('_', ' ').title(), "status": status}
+            if step in self.STEP_TOOLS:
+                entry["tools"] = [
+                    {"name": name, "used": self.tools[tool]["used"]}
+                    for tool, name in self.STEP_TOOLS[step]
+                ]
+            progress["steps"].append(entry)
+
+        for title, names in self.INGREDIENT_GROUPS:
+            progress["ingredient_groups"].append({
+                "title": title,
+                "items": [
+                    {
+                        "name": name.replace('_', ' ').title(),
+                        "current": self.ingredients[name]["current"],
+                        "required": self.ingredients[name]["required"],
+                    }
+                    for name in names
+                ],
+            })
+
+        return progress
+
+    def _all_steps_completed(self) -> bool:
+        return self.steps_completed == set(self.STEPS)
+
+    def check_final_ingredients(self) -> bool:
+        errors = [f"{i}: expected {d['required']}, got {d['current']}" for i, d in self.ingredients.items() if d["current"] != d["required"]]
+        if errors:
+            self._send_feedback(f"Your {self.DISH} didn't turn out quite right... Here are the issues with the ingredients:")
+            for e in errors:
+                self._send_feedback(e)
+            return False
+        else:
+            self._send_feedback(f"You successfully baked a delicious {self.DISH}!")
+            return True
+
+    # -- Shared actions -----------------------------------------------------
+
+    def add_ingredient(self, ingredient: str, amount: int) -> None:
+        if ingredient in self.ingredients:
+            data = self.ingredients[ingredient]
+            # The agent often recaps what it already added; don't count that twice.
+            if data["current"] >= data["required"]:
+                raise ActionRefused(
+                    f"Skipped adding {amount} {ingredient}: it already has {data['current']} "
+                    f"and the recipe needs {data['required']}. Move on to the next step."
+                )
+            data["current"] += amount
+            message = f"Added {amount} {ingredient}"
+            if data["current"] > data["required"]:
+                message += (
+                    f". That makes {data['current']} {ingredient}, but the recipe needs {data['required']}. "
+                    "That's too much. To fix it, start over to empty the bowls, then add the exact amounts again."
+                )
+            self._send_feedback(message)
+        else:
+            self._send_feedback(f"You tried to add {amount} {ingredient}, but {ingredient} is not a valid ingredient")
+
+    def use_tool(self, tool: str) -> None:
+        if tool in self.tools:
+            self.tools[tool]["used"] = True
+            if tool == self.PAN_TOOL:
+                self.tools[tool]["prepared"] = True
+                self.steps_completed.add(self.PAN_STEP)
+                self._send_feedback(self.PAN_MESSAGE)
+            elif tool == "oven":
+                if self.oven_temperature is not None:
+                    self.tools[tool]["preheated"] = True
+                    self.steps_completed.add("preheat_oven")
+                    self._send_feedback(f"You used the oven, which is preheated to {self.oven_temperature}°F")
+                else:
+                    self._send_feedback("You tried to use the oven, but it's not preheated yet.")
+            else:
+                self._send_feedback(f"Using {tool}")
+        else:
+            self._send_feedback(f"You tried to use {tool}, but {tool} is not a valid tool")
+
+    def _shortfall_note(self, names) -> None:
+        """Point out ingredients still below their recipe amount after a mix."""
+        short = [
+            f"{name} is at {self.ingredients[name]['current']} but the recipe needs {self.ingredients[name]['required']}"
+            for name in names
+            if self.ingredients[name]["current"] < self.ingredients[name]["required"]
+        ]
+        if short:
+            self._send_feedback("Heads up: " + "; ".join(short) + ". Add the rest before moving on.")
+
+    def start_over(self) -> None:
+        """Empty the bowls: ingredients and mixing steps reset, but the
+        preheated oven and prepared pan stay ready."""
+        # Only a real overfill needs a reset. Phrases like "empty the dough onto
+        # the counter" must not wipe out good progress.
+        if not any(d["current"] > d["required"] for d in self.ingredients.values()):
+            raise ActionRefused(
+                "No need to start over: no ingredient is over its recipe amount. "
+                "Keep going with the next step."
+            )
+        for data in self.ingredients.values():
+            data["current"] = 0
+        self.steps_completed &= {"preheat_oven", self.PAN_STEP}
+        self._reset_mixing_state()
+        self._send_feedback(
+            "You threw out the mixture and washed the bowls. Every ingredient is back to 0, "
+            "so add each one again with the exact recipe amount."
+        )
+
+    def preheat_oven(self, temperature: int) -> None:
+        self.oven_temperature = temperature
+        self.tools["oven"]["preheated"] = True
+        self.steps_completed.add("preheat_oven")
+        self._send_feedback(f"You preheated the oven to {self.oven_temperature}°F")
+
+
+class CakeEnvironment(KitchenEnvironment):
+    DISH = "cake"
+    MEMORY_HEADINGS = ("steps:", "vanilla cake ingredients:")
+    INGREDIENTS = {
+        "flour": 250, "baking_powder": 2, "salt": 1, "butter": 230,
+        "sugar": 300, "eggs": 4, "vanilla_extract": 2, "milk": 240,
+    }
+    INGREDIENT_GROUPS = [
+        ("Dry Ingredients", ["flour", "baking_powder", "salt"]),
+        ("Wet Ingredients", ["butter", "sugar", "eggs", "vanilla_extract", "milk"]),
+    ]
+    INGREDIENT_ALIASES = {"eggs": ("egg", "eggs")}
+    TOOLS = ["oven", "mixing_bowl", "large_bowl", "whisk", "mixer", "pans"]
+    STEPS = ["preheat_oven", "prepare_pans", "mix_dry_ingredients", "cream", "mix_wet_ingredients", "combine_all_ingredients", "pour_batter", "bake_cake", "cool_cake"]
+    STEP_TOOLS = {
+        "mix_dry_ingredients": [("mixing_bowl", "Mixing Bowl"), ("whisk", "Whisk")],
+        "cream": [("large_bowl", "Large Bowl"), ("mixer", "Mixer")],
+        "mix_wet_ingredients": [("large_bowl", "Large Bowl"), ("mixer", "Mixer")],
+    }
+    PAN_TOOL = "pans"
+    PAN_STEP = "prepare_pans"
+    PAN_MESSAGE = "You prepared the cake pans."
+    ACTION_HINT = "mix dry ingredients, cream butter and sugar, mix wet ingredients, combine all ingredients, pour batter, bake cake, cool cake"
+
+    def _reset_mixing_state(self) -> None:
+        self.dry_mixed = self.wet_mixed = self.cream_done = False
+
+    def _action_prompt_rules(self) -> str:
+        return """- For mixing: "mix dry ingredients", "mix wet ingredients", "cream butter and sugar", "combine all ingredients"
         - For oven actions: "preheat oven to X degrees", "bake cake"
         - For other actions: "pour batter", "cool cake"
 
@@ -139,10 +333,51 @@ class BakingEnvironment:
         Input: "Now I'll add 4 eggs, one at a time, then mix it all together with the mixer"
         Your response: "add 4 eggs, use mixer, mix wet ingredients"
 
-        Input: {action}
-        """
-        response = gpt_request(prompt, model="gpt-4o", max_tokens=100)
-        return response
+        Input: "I'll gently fold the dry ingredients into the wet batter, then pour it into the pans"
+        Your response: "combine all ingredients, pour batter\""""
+
+    TOOL_PATTERN = re.compile(r"(mixing[_ ]bowl|large[_ ]bowl|whisk|mixer|pans|oven)")
+
+    def _detect_actions(self, text: str) -> Optional[List[Tuple[callable, Tuple]]]:
+        if self._is_start_over(text):
+            return [(self.start_over, ())]
+
+        actions = []
+        # "use the mixer to mix wet ingredients" names a tool and a step.
+        if re.search(r"\b(get|use|grab|take)\b", text):
+            match = self.TOOL_PATTERN.search(text)
+            if match:
+                actions.append((self.use_tool, (match.group(1).replace(' ', '_'),)))
+
+        mixing = re.search(r"\b(mix|mixed|whisk|stir|blend|beat)\b", text)
+        if 'preheat' in text:
+            match = re.search(r'(\d+)', text)
+            if not match:
+                return None
+            actions.append((self.preheat_oven, (int(match.group(1)),)))
+        elif 'bake' in text:
+            actions.append((self.bake_cake, ()))
+        elif 'pour' in text:
+            actions.append((self.pour_batter, ()))
+        elif 'cool' in text:
+            actions.append((self.cool_cake, ()))
+        elif 'cream' in text:
+            actions.append((self.mix_ingredients, ("cream",)))
+        elif 'combine' in text or 'fold' in text or ('dry' in text and 'wet' in text):
+            actions.append((self.combine_all_ingredients, ()))
+        elif 'dry' in text and mixing:
+            actions.append((self.mix_ingredients, ("dry",)))
+        elif 'wet' in text and mixing:
+            actions.append((self.mix_ingredients, ("wet",)))
+        elif re.search(r"\badd\b", text):
+            return actions + self._detect_ingredient_add(text)
+
+        return actions or None
+
+    def _after_detect(self, detected_actions: List[Tuple[callable, Tuple]]) -> None:
+        if any(func.__name__ == 'mix_ingredients' and args[0] == 'dry' for func, args in detected_actions) and \
+           any(func.__name__ == 'mix_ingredients' and args[0] == 'wet' for func, args in detected_actions):
+            detected_actions.append((self.combine_all_ingredients, ()))
 
     def _sort_actions(self, actions: List[Tuple[callable, Tuple]]) -> List[Tuple[callable, Tuple]]:
         dependencies = {
@@ -171,99 +406,6 @@ class BakingEnvironment:
 
         return sorted_actions
 
-    def get_progress(self) -> Dict[str, Any]:
-        progress = {
-            "steps": [],
-            "dry_ingredients": [],
-            "wet_ingredients": []
-        }
-        
-        step_tool_map = {
-            "mix_dry_ingredients": [("mixing_bowl", "Mixing Bowl"), ("whisk", "Whisk")],
-            "cream": [("large_bowl", "Large Bowl"), ("mixer", "Mixer")],
-            "mix_wet_ingredients": [("large_bowl", "Large Bowl"), ("mixer", "Mixer")],
-        }
-        
-        all_steps = ["preheat_oven", "prepare_pans", "mix_dry_ingredients", "cream", "mix_wet_ingredients", "combine_all_ingredients", "pour_batter", "bake_cake", "cool_cake"]
-        
-        for step in all_steps:
-            status = "completed" if step in self.steps_completed else "incomplete"
-            step_name = step.replace('_', ' ').title()
-            if step in step_tool_map:
-                tool_statuses = [{"name": name, "used": self.tools[t]["used"]} for t, name in step_tool_map[step]]
-                progress["steps"].append({"name": step_name, "status": status, "tools": tool_statuses})
-            else:
-                progress["steps"].append({"name": step_name, "status": status})
-        
-        dry_ingredients = ["flour", "baking_powder", "salt"]
-        wet_ingredients = ["butter", "sugar", "eggs", "vanilla_extract", "milk"]
-        
-        for ingredient in dry_ingredients:
-            data = self.ingredients[ingredient]
-            progress["dry_ingredients"].append({
-                "name": ingredient.replace('_', ' ').title(),
-                "current": data["current"],
-                "required": data["required"]
-            })
-        
-        for ingredient in wet_ingredients:
-            data = self.ingredients[ingredient]
-            progress["wet_ingredients"].append({
-                "name": ingredient.replace('_', ' ').title(),
-                "current": data["current"],
-                "required": data["required"]
-            })
-        
-        return progress
-
-    def _all_steps_completed(self) -> bool:
-        all_steps = {"preheat_oven", "prepare_pans", "mix_dry_ingredients", "cream", "mix_wet_ingredients", "combine_all_ingredients", "pour_batter", "bake_cake", "cool_cake"}
-        return self.steps_completed == all_steps
-
-    def check_final_ingredients(self) -> bool:
-        errors = [f"{i}: expected {d['required']}, got {d['current']}" for i, d in self.ingredients.items() if d["current"] != d["required"]]
-        if errors:
-            self._send_feedback("Your cake didn't turn out quite right... Here are the issues with the ingredients:")
-            for e in errors:
-                self._send_feedback(e)
-            return False
-        else:
-            self._send_feedback("You successfully baked a delicious cake!")
-            return True
-
-    # Add these methods if they're not already present
-    def add_ingredient(self, ingredient: str, amount: int) -> None:
-        if ingredient in self.ingredients:
-            self.ingredients[ingredient]["current"] += amount
-            self._send_feedback(f"Added {amount} {ingredient}")
-        else:
-            self._send_feedback(f"You tried to add {amount} {ingredient}, but {ingredient} is not a valid ingredient")
-
-    def use_tool(self, tool: str) -> None:
-        if tool in self.tools:
-            self.tools[tool]["used"] = True
-            if tool == "pans":
-                self.tools[tool]["prepared"] = True
-                self.steps_completed.add("prepare_pans")
-                self._send_feedback(f"You prepared the cake pans.")
-            elif tool == "oven":
-                if self.oven_temperature is not None:
-                    self.tools[tool]["preheated"] = True
-                    self.steps_completed.add("preheat_oven")
-                    self._send_feedback(f"You used the oven, which is preheated to {self.oven_temperature}°F")
-                else:
-                    self._send_feedback("You tried to use the oven, but it's not preheated yet.")
-            else:
-                self._send_feedback(f"Using {tool}")
-        else:
-            self._send_feedback(f"You tried to use {tool}, but {tool} is not a valid tool")
-
-    def preheat_oven(self, temperature: int) -> None:
-        self.oven_temperature = temperature
-        self.tools["oven"]["preheated"] = True
-        self.steps_completed.add("preheat_oven")
-        self._send_feedback(f"You preheated the oven to {self.oven_temperature}°F")
-
     def mix_ingredients(self, type: str) -> None:
         if type == "cream":
             required_tools = ["large_bowl", "mixer"]
@@ -285,6 +427,7 @@ class BakingEnvironment:
                     setattr(self, f"{type}_mixed", True)
                     self.steps_completed.add(f"mix_{type}_ingredients")
                     self._send_feedback(f"You mixed the {type} ingredients in the {'mixing' if type == 'dry' else 'large'} bowl with the {'whisk' if type == 'dry' else 'mixer'}")
+                self._shortfall_note(ingredients)
             else:
                 missing_tools = [tool for tool in required_tools if not self.tools[tool]['used']]
                 self._send_feedback(f"You need to use {', '.join(required_tools)} to {'cream the butter and sugar, and are missing' if type == 'cream' else f'mix the {type} ingredients, and are missing'}: {', '.join(missing_tools)}")
@@ -329,3 +472,7 @@ class BakingEnvironment:
             self._send_feedback("You let the pans sit for 10 minutes, then cooled the cake on a wire rack")
         else:
             self._send_feedback("Please bake the cake first")
+
+
+# Kept so existing imports of BakingEnvironment still get the cake kitchen.
+BakingEnvironment = CakeEnvironment
